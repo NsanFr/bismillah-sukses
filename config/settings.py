@@ -25,3 +25,12 @@ DEFAULT_USER_AGENT: str = os.getenv(
 TARGET_INSTAGRAM_ACCOUNTS: List[str] = [
     acc.strip() for acc in os.getenv("TARGET_INSTAGRAM_ACCOUNTS", "infolomba,infolombamahasiswa,beasiswa.id").split(",") if acc.strip()
 ]
+
+# Konfigurasi Instagram Scraping (instagrapi)
+IG_USERNAME: str = os.getenv("IG_USERNAME", "")
+IG_PASSWORD: str = os.getenv("IG_PASSWORD", "")
+IG_SESSION_ID: str = os.getenv("IG_SESSION_ID", "")
+IG_SESSION_FILE: str = os.getenv("IG_SESSION_FILE", "ig_session.json")
+
+# Switch Stealth Fetcher untuk Scrapling (Cloudflare bypass)
+USE_STEALTH_FETCHER: bool = os.getenv("USE_STEALTH_FETCHER", "true").lower() == "true"

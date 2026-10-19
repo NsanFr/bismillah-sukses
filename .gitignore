@@ -7,3 +7,7 @@ __pycache__/
 unit_test_bot.sqlite
 bot_data.sqlite
 .git/
+*.sqlite
+*.sqlite3
+*.db
+ig_session.json

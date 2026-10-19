@@ -15,6 +15,12 @@ class DataNormalizer:
         if not text:
             return None
 
+        # Format 0: YYYY-MM-DD atau YYYY/MM/DD (ISO standard)
+        match_iso = re.search(r'\b(20\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})\b', text)
+        if match_iso:
+            y, m, d = match_iso.groups()
+            return f"{y}-{int(m):02d}-{int(d):02d}"
+
         # Format 1: DD/MM/YYYY atau DD-MM-YYYY
         match_num = re.search(r'\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b', text)
         if match_num:

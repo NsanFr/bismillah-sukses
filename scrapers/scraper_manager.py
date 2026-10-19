@@ -5,7 +5,8 @@ from database.models import OpportunityItem
 from database.db_manager import DatabaseManager
 from scrapers.indbeasiswa_scraper import IndBeasiswaScraper
 from scrapers.kemahasiswaan_scraper import KemahasiswaanScraper
-from scrapers.instagram_scraper import InstagramPublicScraper
+from scrapers.puspresnas_scraper import PuspresnasScraper
+from scrapers.instagram_scraper import InstagramScraper
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,8 @@ class ScraperManager:
         self.scrapers = [
             IndBeasiswaScraper(),
             KemahasiswaanScraper(),
-            InstagramPublicScraper()
+            PuspresnasScraper(),
+            InstagramScraper(),
         ]
 
     async def run_all(self) -> List[OpportunityItem]:
