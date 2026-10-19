@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 # Mengatasi encoding cp1252 pada terminal Windows
@@ -11,7 +12,7 @@ if sys.platform.startswith("win"):
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 import discord
-from cogs.opportunities import OpportunitiesCog
+from cogs.opportunities import OpportunitiesCog, OpportunityPaginatorView
 from cogs.scheduler import SchedulerCog
 from database.db_manager import DatabaseManager
 from database.models import OpportunityItem
@@ -48,11 +49,12 @@ async def test_normalizer():
 
 
 async def test_database():
-    print("\n--- [2] Menguji Database, Deduplikasi, Prune, & Stats ---")
+    print("\n--- [2] Menguji Database, Deduplikasi, Prune, Upcoming Deadlines, & Stats ---")
     if os.path.exists(TEST_DB_FILE):
         os.remove(TEST_DB_FILE)
 
     db = DatabaseManager(db_path=TEST_DB_FILE)
+    today = datetime.now()
 
     item1 = OpportunityItem(
         title="Lomba Hackathon Mahasiswa Nasional 2026",
@@ -61,7 +63,7 @@ async def test_database():
         organizer="Kemdikbud",
         description="Kompetisi membuat solusi berbasis AI",
         url="https://example.com/hackathon-2026",
-        deadline="2026-11-28",
+        deadline=(today + timedelta(days=5)).strftime("%Y-%m-%d"),
         source="Test Source",
     )
 
@@ -75,10 +77,17 @@ async def test_database():
     print(f"Tambah Item 1 lagi (duplikat): is_new={is_new2}")
     assert is_new2 is False, "Item duplikat harus ditolak!"
 
-    # Uji Pencarian
-    results = db.search_opportunities(category="Lomba", keyword="hackathon")
-    print(f"Hasil Pencarian 'hackathon': {len(results)} item ditemukan")
+    # Uji Pencarian dengan tag filter
+    results = db.search_opportunities(category="Lomba", keyword="hackathon", tag="IT & Coding")
+    print(f"Hasil Pencarian 'hackathon' + tag 'IT & Coding': {len(results)} item ditemukan")
     assert len(results) >= 1, "Pencarian harus menemukan minimal 1 item!"
+
+    # Uji get_upcoming_deadlines
+    upcoming = db.get_upcoming_deadlines(days=7)
+    print(f"Hasil get_upcoming_deadlines (7 hari): {len(upcoming)} item")
+    assert len(upcoming) >= 1, "Item dengan deadline 5 hari ke depan harus terdeteksi!"
+    assert upcoming[0].title == item1.title
+    print(">> get_upcoming_deadlines OK!")
 
     # Uji Konfigurasi Guild & Role Notifikasi
     db.set_guild_channels(
@@ -131,44 +140,37 @@ async def test_database():
 
 
 async def test_scrapers():
-    print("\n--- [3] Menguji Network Scraping Live (IndBeasiswa, Kemahasiswaan, Puspresnas, Instagram) ---")
+    print("\n--- [3] Menguji Network Scraping (Kemahasiswaan UI/UGM/UNDIP & Puspresnas) ---")
 
-    # 1. IndBeasiswa Scraper (Scrapling + Stealth Cloudflare Bypass)
-    print("Testing IndBeasiswaScraper...")
-    ind_scraper = IndBeasiswaScraper()
-    items_ind = await ind_scraper.scrape()
-    print(f"IndBeasiswa Scraper menghasilkan {len(items_ind)} item.")
-    assert len(items_ind) > 0, "IndBeasiswa harus menghasilkan data melalui Scrapling!"
-    print(f"  [Contoh]: {items_ind[0].title} | DL: {items_ind[0].deadline} | URL: {items_ind[0].url}")
-
-    # 2. Kemahasiswaan UI & Ditmawa UGM Scraper
-    print("Testing KemahasiswaanScraper...")
+    # 1. Kemahasiswaan UI, UGM, & UNDIP Scraper (Multi-Campus Expanded)
+    print("Testing KemahasiswaanScraper (Multi-Campus: UI, UGM, UNDIP)...")
     kema_scraper = KemahasiswaanScraper()
     items_kema = await kema_scraper.scrape()
     print(f"Kemahasiswaan Kampus Scraper menghasilkan {len(items_kema)} item.")
-    assert len(items_kema) > 0, "Kemahasiswaan harus menghasilkan data!"
-    print(f"  [Contoh]: {items_kema[0].title} | Org: {items_kema[0].organizer}")
+    assert len(items_kema) >= 20, "Kemahasiswaan multi-kampus harus menghasilkan minimal 20 item!"
+    print(f"  [Contoh 1]: {items_kema[0].title} | Org: {items_kema[0].organizer}")
+    print(f"  [Contoh 2]: {items_kema[-1].title} | Org: {items_kema[-1].organizer}")
 
-    # 3. Puspresnas / BPTI Scraper
+    # 2. Puspresnas / BPTI Scraper (dengan Curated Official Fallback)
     print("Testing PuspresnasScraper...")
     pusp_scraper = PuspresnasScraper()
     items_pusp = await pusp_scraper.scrape()
     print(f"Puspresnas / BPTI Scraper menghasilkan {len(items_pusp)} item.")
-    assert len(items_pusp) > 0, "Puspresnas / BPTI harus menghasilkan data kompetisi!"
+    assert len(items_pusp) >= 10, "Puspresnas / BPTI harus menghasilkan data kompetisi nasional!"
     print(f"  [Contoh]: {items_pusp[0].title} | Tags: {items_pusp[0].tags}")
 
-    # 4. Instagram Scraper (instagrapi safe execution)
+    # 3. Instagram Scraper (instagrapi safe execution)
     print("Testing InstagramScraper...")
     ig_scraper = InstagramScraper(target_accounts=["test_dummy_acc"])
     items_ig = await ig_scraper.scrape()
     print(f"Instagram Scraper executed safely, returned {len(items_ig)} items without crashing.")
     assert isinstance(items_ig, list), "Instagram Scraper harus mengembalikan list!"
 
-    print(">> Live Scraping Selesai & Berhasil!")
+    print(">> Scraping Selesai & Berhasil!")
 
 
 async def test_slash_commands_and_broadcast_mock():
-    print("\n--- [4] Menguji Logika Slash Commands & Mock Broadcast ---")
+    print("\n--- [4] Menguji Logika Slash Commands, UI Pagination, & Mock Broadcast ---")
     test_mock_db_file = "test_mock_slash.sqlite"
     if os.path.exists(test_mock_db_file):
         os.remove(test_mock_db_file)
@@ -194,7 +196,6 @@ async def test_slash_commands_and_broadcast_mock():
     bad_channel = MagicMock(spec=discord.TextChannel)
     bad_channel.id = 101010
     bad_channel.mention = "<#101010>"
-    # Bot TIDAK memiliki embed_links
     bad_perms = discord.Permissions(send_messages=True, embed_links=False)
     bad_channel.permissions_for.return_value = bad_perms
 
@@ -263,7 +264,52 @@ async def test_slash_commands_and_broadcast_mock():
     assert "Status Konfigurasi Broadcast" in info_embed.title
     print(">> Eksekusi /channelinfo: OK!")
 
-    # 4. Uji Mock Broadcast Scheduler dengan Role Mention
+    # 4. Uji OpportunityPaginatorView
+    item_sample1 = OpportunityItem(
+        title="Lomba Hackathon 1",
+        category="Lomba",
+        tags=["IT & Coding"],
+        organizer="Test Org",
+        description="Desc 1",
+        url="https://example.com/hackathon-1",
+        deadline="2026-11-20",
+        source="Test",
+    )
+    item_sample2 = OpportunityItem(
+        title="Lomba Hackathon 2",
+        category="Lomba",
+        tags=["IT & Coding"],
+        organizer="Test Org",
+        description="Desc 2",
+        url="https://example.com/hackathon-2",
+        deadline="2026-11-25",
+        source="Test",
+    )
+    paginator = OpportunityPaginatorView([item_sample1, item_sample2], author_id=999)
+    assert len(paginator.children) == 4, "Harus ada 4 komponen di paginator view!"
+    assert paginator.page_indicator.label == "1 / 2"
+    assert paginator.link_btn.url == "https://example.com/hackathon-1"
+    assert paginator.prev_button.disabled is True
+    assert paginator.next_button.disabled is False
+    print(">> OpportunityPaginatorView state & tombol navigasi: OK!")
+
+    # 5. Uji /deadline command
+    mock_db.add_opportunity(item_sample1)
+    mock_db.add_opportunity(item_sample2)
+
+    interaction_deadline = MagicMock(spec=discord.Interaction)
+    interaction_deadline.guild = mock_guild
+    interaction_deadline.user = MagicMock(id=999)
+    interaction_deadline.response = AsyncMock()
+    interaction_deadline.followup = AsyncMock()
+
+    await opp_cog.cmd_deadline.callback(opp_cog, interaction_deadline, hari=60, kategori="Semua")
+    interaction_deadline.followup.send.assert_called_once()
+    deadline_content = interaction_deadline.followup.send.call_args[1]["content"]
+    assert "peluang dengan deadline terdekat" in deadline_content
+    print(">> Eksekusi Slash Command /deadline: OK!")
+
+    # 6. Uji Mock Broadcast Scheduler dengan Role Mention
     mock_sm = MagicMock(spec=ScraperManager)
     sched_cog = SchedulerCog(mock_bot, mock_db, mock_sm)
 
@@ -278,7 +324,6 @@ async def test_slash_commands_and_broadcast_mock():
         source="Test Source",
     )
 
-    # Mock _resolve_channel to return a mock sendable channel
     mock_channel_target = AsyncMock(spec=discord.TextChannel)
     sched_cog._resolve_channel = AsyncMock(return_value=mock_channel_target)
 
@@ -289,6 +334,7 @@ async def test_slash_commands_and_broadcast_mock():
     assert send_kwargs["content"] == "<@&88888>", f"Ekspektasi role mention <@&88888>, didapat {send_kwargs['content']}"
     assert isinstance(send_kwargs["embed"], discord.Embed), "Embed harus disertakan dalam broadcast!"
     print(">> Mock Broadcast dengan Role Mention & Embed: OK!")
+
     if os.path.exists(test_mock_db_file):
         os.remove(test_mock_db_file)
 

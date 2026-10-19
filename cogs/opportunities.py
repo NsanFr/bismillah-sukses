@@ -1,18 +1,88 @@
 import logging
-from typing import Optional
+from typing import List, Literal, Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from database.db_manager import DatabaseManager
+from database.models import OpportunityItem
 from utils.embeds import create_opportunity_embed
 
 logger = logging.getLogger(__name__)
 
 
+class OpportunityPaginatorView(discord.ui.View):
+    """
+    Komponen interaktif Discord UI untuk navigasi multi-halaman embed lomba & beasiswa.
+    Dilengkapi tombol Sebelumnya, Indikator Halaman, Berikutnya, dan Tautan Registrasi Langsung.
+    """
+
+    def __init__(self, items: List[OpportunityItem], author_id: int, timeout: float = 180.0):
+        super().__init__(timeout=timeout)
+        self.items = items
+        self.embeds = [create_opportunity_embed(item) for item in items]
+        self.author_id = author_id
+        self.current_page = 0
+
+        # Tombol Link Eksternal dinamis
+        initial_url = self.items[0].url if self.items and self.items[0].url.startswith("http") else "https://discord.com"
+        self.link_btn = discord.ui.Button(
+            label="🔗 Buka Link Resmi",
+            style=discord.ButtonStyle.link,
+            url=initial_url
+        )
+        self.add_item(self.link_btn)
+
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_button.disabled = (self.current_page == 0)
+        self.next_button.disabled = (self.current_page == len(self.embeds) - 1)
+        self.page_indicator.label = f"{self.current_page + 1} / {len(self.embeds)}"
+
+        # Update link pendaftaran jika URL valid
+        cur_url = self.items[self.current_page].url
+        if cur_url and cur_url.startswith("http"):
+            self.link_btn.url = cur_url
+            self.link_btn.disabled = False
+        else:
+            self.link_btn.url = "https://discord.com"
+            self.link_btn.disabled = True
+
+    @discord.ui.button(label="◀ Sebelumnya", style=discord.ButtonStyle.secondary, custom_id="opp_prev")
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Anda tidak dapat mengontrol tombol navigasi pengguna lain.", ephemeral=True)
+            return
+        if self.current_page > 0:
+            self.current_page -= 1
+            self._update_buttons()
+            await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+
+    @discord.ui.button(label="1 / 1", style=discord.ButtonStyle.primary, disabled=True, custom_id="opp_page")
+    async def page_indicator(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass
+
+    @discord.ui.button(label="Berikutnya ▶", style=discord.ButtonStyle.secondary, custom_id="opp_next")
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("❌ Anda tidak dapat mengontrol tombol navigasi pengguna lain.", ephemeral=True)
+            return
+        if self.current_page < len(self.embeds) - 1:
+            self.current_page += 1
+            self._update_buttons()
+            await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+
+    async def on_timeout(self):
+        # Nonaktifkan navigasi tombol ketika waktu interaksi habis
+        for child in self.children:
+            if isinstance(child, discord.ui.Button) and child.style != discord.ButtonStyle.link:
+                child.disabled = True
+
+
 class OpportunitiesCog(commands.Cog):
-    """Cog untuk menangani Slash Commands pencarian Lomba, Beasiswa, dan manajemen Channel."""
+    """Cog untuk menangani Slash Commands pencarian Lomba, Beasiswa, Deadline Mendesak, dan manajemen Channel."""
 
     def __init__(self, bot: commands.Bot, db: DatabaseManager):
         self.bot = bot
@@ -20,50 +90,81 @@ class OpportunitiesCog(commands.Cog):
 
     @app_commands.command(name="lomba", description="Cari info kompetisi mahasiswa aktif yang tersedia.")
     @app_commands.describe(
-        keyword="Kata kunci pencarian (contoh: coding, desain, bmc, paper)",
-        jumlah="Jumlah hasil yang ingin ditampilkan (maksimal 10)"
+        keyword="Kata kunci bebas (contoh: hackathon, esai, poster, robot)",
+        bidang="Filter bidang/kategori khusus lomba",
+        jumlah="Jumlah hasil yang ingin ditampilkan (maksimal 15)"
     )
+    @app_commands.choices(bidang=[
+        app_commands.Choice(name="💻 IT & Coding / Hackathon", value="IT & Coding"),
+        app_commands.Choice(name="📈 Business Plan & Case", value="Business & Case"),
+        app_commands.Choice(name="📝 Karya Tulis Ilmiah / Riset", value="Karya Tulis & Riset"),
+        app_commands.Choice(name="🎨 Desain & Kreatif / Poster", value="Desain & Kreatif"),
+        app_commands.Choice(name="🎙️ Debat & Pidato", value="Debat & Pidato"),
+    ])
     async def cmd_lomba(
         self,
         interaction: discord.Interaction,
         keyword: Optional[str] = None,
-        jumlah: Optional[int] = 3
+        bidang: Optional[app_commands.Choice[str]] = None,
+        jumlah: Optional[int] = 5
     ):
         await interaction.response.defer(ephemeral=False)
-        jumlah = max(1, min(jumlah or 3, 10))
+        jumlah = max(1, min(jumlah or 5, 15))
+        tag_val = bidang.value if bidang else None
 
-        results = self.db.search_opportunities(category="Lomba", keyword=keyword, limit=jumlah)
+        results = self.db.search_opportunities(
+            category="Lomba",
+            keyword=keyword,
+            tag=tag_val,
+            limit=jumlah
+        )
 
         if not results:
             msg = "❌ Belum ada info lomba yang cocok"
+            filters = []
             if keyword:
-                msg += f" dengan kata kunci '**{keyword}**'."
+                filters.append(f"kata kunci '**{keyword}**'")
+            if bidang:
+                filters.append(f"bidang '**{bidang.name}**'")
+            if filters:
+                msg += " dengan " + " dan ".join(filters) + "."
             else:
                 msg += " saat ini."
             await interaction.followup.send(msg)
             return
 
-        embeds = [create_opportunity_embed(item) for item in results]
-        await interaction.followup.send(
-            content=f"🏆 Menampilkan **{len(results)}** peluang lomba mahasiswa:",
-            embeds=embeds[:10]
-        )
+        if len(results) == 1:
+            await interaction.followup.send(
+                content=f"🏆 Ditemukan **1** peluang lomba mahasiswa:",
+                embed=create_opportunity_embed(results[0])
+            )
+        else:
+            view = OpportunityPaginatorView(results, author_id=interaction.user.id)
+            await interaction.followup.send(
+                content=f"🏆 Ditemukan **{len(results)}** peluang lomba mahasiswa (gunakan tombol untuk navigasi):",
+                embed=view.embeds[0],
+                view=view
+            )
 
     @app_commands.command(name="beasiswa", description="Cari info beasiswa mahasiswa aktif yang sedang dibuka.")
     @app_commands.describe(
-        keyword="Kata kunci pencarian (contoh: djarum, kse, fully funded, s1)",
-        jumlah="Jumlah hasil yang ingin ditampilkan (maksimal 10)"
+        keyword="Kata kunci pencarian (contoh: baznas, djarum, s1, prestasi)",
+        jumlah="Jumlah hasil yang ingin ditampilkan (maksimal 15)"
     )
     async def cmd_beasiswa(
         self,
         interaction: discord.Interaction,
         keyword: Optional[str] = None,
-        jumlah: Optional[int] = 3
+        jumlah: Optional[int] = 5
     ):
         await interaction.response.defer(ephemeral=False)
-        jumlah = max(1, min(jumlah or 3, 10))
+        jumlah = max(1, min(jumlah or 5, 15))
 
-        results = self.db.search_opportunities(category="Beasiswa", keyword=keyword, limit=jumlah)
+        results = self.db.search_opportunities(
+            category="Beasiswa",
+            keyword=keyword,
+            limit=jumlah
+        )
 
         if not results:
             msg = "❌ Belum ada info beasiswa yang cocok"
@@ -74,11 +175,62 @@ class OpportunitiesCog(commands.Cog):
             await interaction.followup.send(msg)
             return
 
-        embeds = [create_opportunity_embed(item) for item in results]
-        await interaction.followup.send(
-            content=f"🎓 Menampilkan **{len(results)}** peluang beasiswa kuliah:",
-            embeds=embeds[:10]
+        if len(results) == 1:
+            await interaction.followup.send(
+                content=f"🎓 Ditemukan **1** beasiswa kuliah aktif:",
+                embed=create_opportunity_embed(results[0])
+            )
+        else:
+            view = OpportunityPaginatorView(results, author_id=interaction.user.id)
+            await interaction.followup.send(
+                content=f"🎓 Ditemukan **{len(results)}** beasiswa kuliah aktif (gunakan tombol untuk navigasi):",
+                embed=view.embeds[0],
+                view=view
+            )
+
+    @app_commands.command(
+        name="deadline",
+        description="Lihat daftar lomba dan beasiswa yang akan ditutup dalam waktu dekat."
+    )
+    @app_commands.describe(
+        hari="Rentang hari ke depan yang dicek (default: 14 hari)",
+        kategori="Filter kategori peluang"
+    )
+    async def cmd_deadline(
+        self,
+        interaction: discord.Interaction,
+        hari: Optional[int] = 14,
+        kategori: Optional[Literal["Semua", "Lomba", "Beasiswa"]] = "Semua"
+    ):
+        await interaction.response.defer(ephemeral=False)
+        hari = max(1, min(hari or 14, 60))
+
+        results = self.db.get_upcoming_deadlines(
+            days=hari,
+            category=kategori,
+            limit=10
         )
+
+        if not results:
+            await interaction.followup.send(
+                f"🎉 Tidak ada info {kategori.lower() if kategori != 'Semua' else 'lomba/beasiswa'} "
+                f"yang mendekati batas akhir pendaftaran dalam **{hari} hari** ke depan."
+            )
+            return
+
+        cat_label = f" ({kategori})" if kategori != "Semua" else ""
+        if len(results) == 1:
+            await interaction.followup.send(
+                content=f"⏳ Ditemukan **1** peluang{cat_label} dengan deadline terdekat (dalam {hari} hari):",
+                embed=create_opportunity_embed(results[0])
+            )
+        else:
+            view = OpportunityPaginatorView(results, author_id=interaction.user.id)
+            await interaction.followup.send(
+                content=f"⏳ Ditemukan **{len(results)}** peluang{cat_label} dengan deadline terdekat (dalam {hari} hari):",
+                embed=view.embeds[0],
+                view=view
+            )
 
     @app_commands.command(
         name="setchannel",

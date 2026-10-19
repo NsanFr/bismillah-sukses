@@ -2,7 +2,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 
 from database.models import OpportunityItem
@@ -107,9 +107,10 @@ class DatabaseManager:
         self,
         category: Optional[str] = None,
         keyword: Optional[str] = None,
+        tag: Optional[str] = None,
         limit: int = 10
     ) -> List[OpportunityItem]:
-        """Mencari data berdasarkan kategori dan kata kunci teks."""
+        """Mencari data berdasarkan kategori, kata kunci teks, dan filter bidang/tag."""
         query = "SELECT * FROM opportunities WHERE is_active = 1"
         params = []
 
@@ -122,7 +123,66 @@ class DatabaseManager:
             wildcard = f"%{keyword}%"
             params.extend([wildcard, wildcard, wildcard])
 
+        if tag:
+            query += " AND tags LIKE ?"
+            params.append(f"%{tag}%")
+
         query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+
+        results: List[OpportunityItem] = []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            for row in rows:
+                try:
+                    tags = json.loads(row["tags"]) if row["tags"] else []
+                except Exception:
+                    tags = []
+
+                results.append(OpportunityItem(
+                    title=row["title"],
+                    category=row["category"],
+                    tags=tags,
+                    organizer=row["organizer"],
+                    description=row["description"],
+                    url=row["url"],
+                    deadline=row["deadline"],
+                    source=row["source"],
+                    image_url=row["image_url"],
+                    source_id=row["source_id"]
+                ))
+        return results
+
+    def get_upcoming_deadlines(
+        self,
+        days: int = 14,
+        category: Optional[str] = None,
+        limit: int = 10
+    ) -> List[OpportunityItem]:
+        """
+        Mengambil peluang aktif yang tanggal batas akhirnya (deadline) akan ditutup
+        dalam N hari ke depan, diurutkan dari yang paling mendesak (terdekat).
+        """
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        max_date_str = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+        query = """
+            SELECT * FROM opportunities
+            WHERE is_active = 1
+              AND deadline IS NOT NULL
+              AND deadline GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+              AND deadline >= ?
+              AND deadline <= ?
+        """
+        params = [today_str, max_date_str]
+
+        if category and category.lower() != "semua":
+            query += " AND category = ?"
+            params.append(category)
+
+        query += " ORDER BY deadline ASC LIMIT ?"
         params.append(limit)
 
         results: List[OpportunityItem] = []

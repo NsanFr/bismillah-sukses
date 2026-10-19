@@ -10,13 +10,14 @@ logger = logging.getLogger(__name__)
 
 class KemahasiswaanScraper(BaseScraper):
     """
-    Scraper portal kemahasiswaan universitas terakreditasi unggul (UI & UGM).
-    Menggunakan Scrapling Adaptor untuk query DOM cepat dan ekstraksi terstruktur.
+    Scraper portal kemahasiswaan universitas terakreditasi unggul (UI, UGM, UNDIP).
+    Menyediakan info lomba/prestasi dan beasiswa resmi tingkat mahasiswa aktif tanpa proteksi Cloudflare.
     """
 
     def __init__(self):
-        super().__init__(name="Portal Kemahasiswaan Kampus", timeout=20.0)
+        super().__init__(name="Portal Kemahasiswaan Kampus", timeout=15.0)
         self.sources = [
+            # Universitas Indonesia (UI)
             {
                 "url": "https://kemahasiswaan.ui.ac.id/category/prestasi/",
                 "category": "Lomba",
@@ -28,7 +29,18 @@ class KemahasiswaanScraper(BaseScraper):
                 "organizer": "Mitra Beasiswa UI",
             },
             {
+                "url": "https://kemahasiswaan.ui.ac.id/category/pengumuman/",
+                "category": "Beasiswa",
+                "organizer": "Kemahasiswaan UI",
+            },
+            # Universitas Gadjah Mada (UGM)
+            {
                 "url": "https://ditmawa.ugm.ac.id/category/prestasi/info-lomba/",
+                "category": "Lomba",
+                "organizer": "Ditmawa UGM",
+            },
+            {
+                "url": "https://ditmawa.ugm.ac.id/category/prestasi/",
                 "category": "Lomba",
                 "organizer": "Ditmawa UGM",
             },
@@ -36,6 +48,17 @@ class KemahasiswaanScraper(BaseScraper):
                 "url": "https://ditmawa.ugm.ac.id/category/beasiswa/",
                 "category": "Beasiswa",
                 "organizer": "Mitra Ditmawa UGM",
+            },
+            # Universitas Diponegoro (UNDIP)
+            {
+                "url": "https://kemahasiswaan.undip.ac.id/category/beasiswa/",
+                "category": "Beasiswa",
+                "organizer": "Ditmawa UNDIP",
+            },
+            {
+                "url": "https://kemahasiswaan.undip.ac.id/kantorprestasi/",
+                "category": "Lomba",
+                "organizer": "Kantor Prestasi UNDIP",
             },
         ]
 
@@ -48,11 +71,11 @@ class KemahasiswaanScraper(BaseScraper):
         seen_urls = set()
 
         try:
-            # 1. Coba pola card/article WordPress (UGM, dsb.)
+            # 1. Pola card/article WordPress (UGM, UNDIP, dsb.)
             articles = adaptor.css("article, .post, .entry")
             if articles:
                 for art in articles:
-                    title_elem = art.css("h2 a, h3 a, .entry-title a")
+                    title_elem = art.css("h2 a, h3 a, h4 a, .entry-title a")
                     if not title_elem:
                         continue
 
@@ -106,7 +129,6 @@ class KemahasiswaanScraper(BaseScraper):
 
                     seen_urls.add(href)
 
-                    # Coba cari deskripsi atau tanggal di sekitar heading
                     full_text = title
                     deadline = DataNormalizer.extract_deadline(full_text)
                     tags = DataNormalizer.classify_tags(full_text)
