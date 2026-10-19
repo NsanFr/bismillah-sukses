@@ -11,3 +11,4 @@ bot_data.sqlite
 *.sqlite3
 *.db
 ig_session.json
+deploy_key

@@ -7,6 +7,7 @@ from scrapers.indbeasiswa_scraper import IndBeasiswaScraper
 from scrapers.kemahasiswaan_scraper import KemahasiswaanScraper
 from scrapers.puspresnas_scraper import PuspresnasScraper
 from scrapers.instagram_scraper import InstagramScraper
+from scrapers.infolomba_scraper import InfoLombaScraper
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class ScraperManager:
             KemahasiswaanScraper(),
             PuspresnasScraper(),
             InstagramScraper(),
+            InfoLombaScraper(),
         ]
 
     async def run_all(self) -> List[OpportunityItem]:
